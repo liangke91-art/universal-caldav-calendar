@@ -39,4 +39,21 @@ describe("iCalendar helpers", () => {
     expect(event.end).toBe("2026-09-03T09:00:00Z");
     expect(updated).toContain("SEQUENCE:1");
   });
+
+  it("parses calendar-data whose iCalendar properties are server-indented", () => {
+    const indented = [
+      "BEGIN:VCALENDAR",
+      "  VERSION:2.0",
+      "  BEGIN:VEVENT",
+      "  UID:indented@example",
+      "  DTSTART:20260831T033000Z",
+      "  DTEND:20260831T033500Z",
+      "  SUMMARY:Indented response",
+      "  END:VEVENT",
+      "  END:VCALENDAR",
+    ].join("\r\n");
+    const event = parseIcsEvents(indented, "Asia/Shanghai")[0];
+    expect(event.uid).toBe("indented@example");
+    expect(event.title).toBe("Indented response");
+  });
 });
