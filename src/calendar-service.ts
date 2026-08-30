@@ -97,8 +97,14 @@ export class CalendarService {
       );
       events.push(...this.parseResources(resources, calendar));
     }
+    const rangeStart = Temporal.Instant.from(startIso).epochMilliseconds;
+    const rangeEnd = Temporal.Instant.from(endIso).epochMilliseconds;
     return events
-      .filter((event) => event.status.toUpperCase() !== "CANCELLED")
+      .filter((event) => {
+        if (event.status.toUpperCase() === "CANCELLED") return false;
+        const [eventStart, eventEnd] = this.eventInterval(event);
+        return eventStart < rangeEnd && eventEnd > rangeStart;
+      })
       .sort((left, right) => left.start.localeCompare(right.start))
       .slice(0, Math.max(1, Math.min(maxResults, 1000)));
   }

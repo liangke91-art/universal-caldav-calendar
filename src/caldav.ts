@@ -145,16 +145,37 @@ export class CalDavClient {
   }
 
   async queryEvents(calendarUrl: string, start: string, end: string, expand = true): Promise<CalDavResource[]> {
-    const expandElement = expand ? `<C:expand start="${xmlEscape(start)}" end="${xmlEscape(end)}"/>` : "";
-    const body = `<?xml version="1.0" encoding="utf-8"?><C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/><C:calendar-data>${expandElement}</C:calendar-data></D:prop><C:filter><C:comp-filter name="VCALENDAR"><C:comp-filter name="VEVENT"><C:time-range start="${xmlEscape(start)}" end="${xmlEscape(end)}"/></C:comp-filter></C:comp-filter></C:filter></C:calendar-query>`;
-    const response = await this.request("REPORT", calendarUrl, body, { depth: "1" });
-    return parseMultiStatus(await response.text())
+    const parseResources = (xml: string): CalDavResource[] => parseMultiStatus(xml)
       .map((item) => ({
         href: new URL(item.href, calendarUrl).toString(),
         etag: text(item.properties.getetag) || undefined,
         ics: text(item.properties["calendar-data"]),
       }))
       .filter((item) => item.ics.includes("BEGIN:VEVENT"));
+
+    const expandElement = expand ? `<C:expand start="${xmlEscape(start)}" end="${xmlEscape(end)}"/>` : "";
+    const report = async (eventFilter: string, calendarData = expandElement): Promise<CalDavResource[]> => {
+      const body = `<?xml version="1.0" encoding="utf-8"?><C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/><C:calendar-data>${calendarData}</C:calendar-data></D:prop><C:filter><C:comp-filter name="VCALENDAR">${eventFilter}</C:comp-filter></C:filter></C:calendar-query>`;
+      const response = await this.request("REPORT", calendarUrl, body, { depth: "1" });
+      return parseResources(await response.text());
+    };
+
+    // RFC 4791 time-range queries are the efficient path. Some otherwise valid
+    // CalDAV servers (including fruux deployments) occasionally return an empty
+    // multistatus for this filter even though UID queries and writes work. Retry
+    // with an unbounded VEVENT query and keep expansion requested; CalendarService
+    // applies the requested interval again locally so the public result stays exact.
+    const ranged = await report(
+      `<C:comp-filter name="VEVENT"><C:time-range start="${xmlEscape(start)}" end="${xmlEscape(end)}"/></C:comp-filter>`,
+    );
+    if (ranged.length) return ranged;
+
+    const expandedFallback = await report('<C:comp-filter name="VEVENT"/>');
+    if (expandedFallback.length) return expandedFallback;
+
+    // A final raw-data fallback covers servers that support calendar-query but
+    // reject the optional calendar-data/expand extension.
+    return report('<C:comp-filter name="VEVENT"/>', "");
   }
 
   async findEventByUid(uid: string, calendars?: CalDavCalendar[]): Promise<{ calendar: CalDavCalendar; resource: CalDavResource }> {
