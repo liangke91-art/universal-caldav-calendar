@@ -1,5 +1,5 @@
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
-import { randomToken, safeEqual } from "./crypto";
+import { decryptJson, encryptJson, randomToken, safeEqual, type EncryptedValue } from "./crypto";
 
 export type AuthProps = {
   userId: string;
@@ -11,6 +11,12 @@ type OAuthEnv = Env & { OAUTH_PROVIDER: OAuthHelpers };
 type UpstreamState = {
   oauthRequest: AuthRequest;
   verifier: string;
+  state: string;
+  issuedAt: number;
+};
+type ConsentState = {
+  oauthRequest: AuthRequest;
+  issuedAt: number;
 };
 type GitHubTokenResponse = {
   access_token?: string;
@@ -26,6 +32,7 @@ const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
 const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const GITHUB_USER_URL = "https://api.github.com/user";
 const STATE_COOKIE = "__Host-CALENDAR_STATE";
+const OAUTH_STATE_MAX_AGE_MS = 15 * 60 * 1000;
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
@@ -44,6 +51,29 @@ function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function urlSafeBase64(value: string): string {
+  return value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function sealState(value: unknown, secret: string): Promise<string> {
+  const encrypted = await encryptJson(value, secret);
+  return `1.${urlSafeBase64(encrypted.iv)}.${urlSafeBase64(encrypted.ciphertext)}`;
+}
+
+async function openState<T>(token: string, secret: string): Promise<T | undefined> {
+  const [version, iv, ciphertext, extra] = token.split(".");
+  if (version !== "1" || !iv || !ciphertext || extra !== undefined) return undefined;
+  try {
+    return await decryptJson<T>({ version: 1, iv, ciphertext } satisfies EncryptedValue, secret);
+  } catch {
+    return undefined;
+  }
+}
+
+function isFresh(issuedAt: number): boolean {
+  return Number.isFinite(issuedAt) && issuedAt <= Date.now() + 30_000 && Date.now() - issuedAt <= OAUTH_STATE_MAX_AGE_MS;
 }
 
 async function challenge(verifier: string): Promise<string> {
@@ -121,9 +151,8 @@ export async function handleAuthRequest(request: Request, env: OAuthEnv): Promis
   if (request.method === "GET" && url.pathname === "/authorize") {
     const oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
     if (!oauthRequest.clientId) return new Response("Invalid OAuth request", { status: 400 });
-    const state = randomToken();
     const csrf = randomToken();
-    await env.OAUTH_KV.put(`consent:${state}`, JSON.stringify(oauthRequest), { expirationTtl: 600 });
+    const state = await sealState({ oauthRequest, issuedAt: Date.now() } satisfies ConsentState, env.CREDENTIALS_MASTER_KEY);
     const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
     return consentPage(client?.clientName || "ChatGPT / Codex", state, csrf);
   }
@@ -134,16 +163,16 @@ export async function handleAuthRequest(request: Request, env: OAuthEnv): Promis
     const csrf = String(form.get("csrf") ?? "");
     const cookieCsrf = cookie(request, "__Host-CALENDAR_CSRF") ?? "";
     if (!csrf || !cookieCsrf || !safeEqual(csrf, cookieCsrf)) return new Response("Invalid CSRF token", { status: 400 });
-    const oauthRequest = await env.OAUTH_KV.get<AuthRequest>(`consent:${state}`, "json");
-    await env.OAUTH_KV.delete(`consent:${state}`);
-    if (!oauthRequest?.clientId) return new Response("Expired OAuth request", { status: 400 });
+    const consent = await openState<ConsentState>(state, env.CREDENTIALS_MASTER_KEY);
+    if (!consent?.oauthRequest.clientId || !isFresh(consent.issuedAt)) {
+      return new Response("Expired OAuth request", { status: 400 });
+    }
 
     const upstreamState = randomToken();
     const verifier = randomToken(48);
-    await env.OAUTH_KV.put(
-      `upstream:${upstreamState}`,
-      JSON.stringify({ oauthRequest, verifier } satisfies UpstreamState),
-      { expirationTtl: 600 },
+    const upstreamCookie = await sealState(
+      { oauthRequest: consent.oauthRequest, verifier, state: upstreamState, issuedAt: Date.now() } satisfies UpstreamState,
+      env.CREDENTIALS_MASTER_KEY,
     );
     const authorize = new URL(GITHUB_AUTHORIZE_URL);
     authorize.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
@@ -155,7 +184,7 @@ export async function handleAuthRequest(request: Request, env: OAuthEnv): Promis
       status: 302,
       headers: {
         location: authorize.toString(),
-        "set-cookie": `${STATE_COOKIE}=${upstreamState}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`,
+        "set-cookie": `${STATE_COOKIE}=${upstreamCookie}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=900`,
         "cache-control": "no-store",
       },
     });
@@ -163,13 +192,10 @@ export async function handleAuthRequest(request: Request, env: OAuthEnv): Promis
 
   if (request.method === "GET" && url.pathname === "/callback") {
     const state = url.searchParams.get("state") ?? "";
-    const cookieState = cookie(request, STATE_COOKIE) ?? "";
-    if (!state || !cookieState || !safeEqual(state, cookieState)) {
+    const stored = await openState<UpstreamState>(cookie(request, STATE_COOKIE) ?? "", env.CREDENTIALS_MASTER_KEY);
+    if (!state || !stored || !safeEqual(state, stored.state) || !isFresh(stored.issuedAt)) {
       return new Response("Invalid OAuth state", { status: 400, headers: { "set-cookie": clearStateCookie() } });
     }
-    const stored = await env.OAUTH_KV.get<UpstreamState>(`upstream:${state}`, "json");
-    await env.OAUTH_KV.delete(`upstream:${state}`);
-    if (!stored) return new Response("Expired OAuth callback", { status: 400, headers: { "set-cookie": clearStateCookie() } });
     const code = url.searchParams.get("code") ?? "";
     if (!code || url.searchParams.has("error")) {
       return new Response("GitHub authorization was not completed", { status: 400, headers: { "set-cookie": clearStateCookie() } });
