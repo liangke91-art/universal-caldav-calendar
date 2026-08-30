@@ -85,8 +85,9 @@ function clearStateCookie(): string {
   return `${STATE_COOKIE}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
 }
 
-function consentPage(clientName: string, state: string, csrf: string): Response {
-  const body = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>授权 Universal Calendar</title><style>body{font-family:system-ui,sans-serif;max-width:640px;margin:56px auto;padding:0 20px;color:#18212f}.card{border:1px solid #dce2ea;border-radius:16px;padding:28px;box-shadow:0 8px 30px #17304a12}button{font:inherit;border:0;border-radius:9px;padding:12px 18px;background:#1668dc;color:#fff;font-weight:700}.muted{color:#58687a;line-height:1.6}</style></head><body><div class="card"><h1>授权 Universal Calendar</h1><p><strong>${escapeHtml(clientName)}</strong> 请求访问你的日历工具。</p><p class="muted">下一步使用 GitHub 验证身份。此应用不申请仓库权限，也不会保存 GitHub access token。授权后可查询、新建、修改和删除日程；CalDAV 凭据通过独立的加密设置页录入，不进入对话。</p><form method="post" action="/authorize"><input type="hidden" name="state" value="${escapeHtml(state)}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit">使用 GitHub 登录并授权</button></form></div></body></html>`;
+function consentPage(clientName: string, state: string): Response {
+  const startUrl = `/github-start?request=${encodeURIComponent(state)}`;
+  const body = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>授权 Universal Calendar</title><style>body{font-family:system-ui,sans-serif;max-width:640px;margin:56px auto;padding:0 20px;color:#18212f}.card{border:1px solid #dce2ea;border-radius:16px;padding:28px;box-shadow:0 8px 30px #17304a12}.button{display:inline-block;text-decoration:none;border-radius:9px;padding:12px 18px;background:#1668dc;color:#fff;font-weight:700}.muted{color:#58687a;line-height:1.6}</style></head><body><div class="card"><h1>授权 Universal Calendar</h1><p><strong>${escapeHtml(clientName)}</strong> 请求访问你的日历工具。</p><p class="muted">下一步使用 GitHub 验证身份。此应用不申请仓库权限，也不会保存 GitHub access token。授权后可查询、新建、修改和删除日程；CalDAV 凭据通过独立的加密设置页录入，不进入对话。</p><a class="button" href="${escapeHtml(startUrl)}">使用 GitHub 登录并授权</a></div></body></html>`;
   return new Response(body, {
     headers: {
       "content-type": "text/html; charset=utf-8",
@@ -94,7 +95,6 @@ function consentPage(clientName: string, state: string, csrf: string): Response 
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
-      "set-cookie": `__Host-CALENDAR_CSRF=${csrf}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`,
     },
   });
 }
@@ -151,18 +151,13 @@ export async function handleAuthRequest(request: Request, env: OAuthEnv): Promis
   if (request.method === "GET" && url.pathname === "/authorize") {
     const oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
     if (!oauthRequest.clientId) return new Response("Invalid OAuth request", { status: 400 });
-    const csrf = randomToken();
     const state = await sealState({ oauthRequest, issuedAt: Date.now() } satisfies ConsentState, env.CREDENTIALS_MASTER_KEY);
     const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
-    return consentPage(client?.clientName || "ChatGPT / Codex", state, csrf);
+    return consentPage(client?.clientName || "ChatGPT / Codex", state);
   }
 
-  if (request.method === "POST" && url.pathname === "/authorize") {
-    const form = await request.formData();
-    const state = String(form.get("state") ?? "");
-    const csrf = String(form.get("csrf") ?? "");
-    const cookieCsrf = cookie(request, "__Host-CALENDAR_CSRF") ?? "";
-    if (!csrf || !cookieCsrf || !safeEqual(csrf, cookieCsrf)) return new Response("Invalid CSRF token", { status: 400 });
+  if (request.method === "GET" && url.pathname === "/github-start") {
+    const state = url.searchParams.get("request") ?? "";
     const consent = await openState<ConsentState>(state, env.CREDENTIALS_MASTER_KEY);
     if (!consent?.oauthRequest.clientId || !isFresh(consent.issuedAt)) {
       return new Response("Expired OAuth request", { status: 400 });

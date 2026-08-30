@@ -242,7 +242,7 @@ const mcpApiHandler = {
 
 async function defaultHandler(request: Request, env: Env & { OAUTH_PROVIDER: any }, _ctx: ExecutionContext): Promise<Response> {
   const path = new URL(request.url).pathname;
-  if (path === "/authorize" || path === "/callback") return handleAuthRequest(request, env);
+  if (path === "/authorize" || path === "/github-start" || path === "/callback") return handleAuthRequest(request, env);
   if (path === "/setup") return handleSetupRequest(request, env);
   if (path === "/healthz") return Response.json({ ok: true, service: "universal-caldav-calendar" });
   if (path === "/privacy") return new Response("CalDAV credentials are encrypted with AES-256-GCM and stored per authenticated user. Credentials are never returned by tools or logged intentionally.", { headers: { "content-type": "text/plain; charset=utf-8" } });
