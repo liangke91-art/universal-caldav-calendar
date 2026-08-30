@@ -201,7 +201,9 @@ export async function handleAuthRequest(request: Request, env: OAuthEnv): Promis
       if (!allowedGitHubLogin(env, user.login)) {
         return new Response("This GitHub account is not allowed.", { status: 403, headers: { "set-cookie": clearStateCookie() } });
       }
-      const userId = `github:${user.id}`;
+      // workers-oauth-provider serializes authorization codes with ':' as a
+      // delimiter, so application user IDs must not contain that character.
+      const userId = `github-${user.id}`;
       const name = user.name?.trim() || user.login;
       const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
         request: stored.oauthRequest,
