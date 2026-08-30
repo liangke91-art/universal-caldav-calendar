@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import { randomToken, safeEqual } from "./crypto";
 
@@ -42,7 +41,9 @@ function cookie(request: Request, name: string): string | undefined {
 }
 
 function base64Url(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString("base64url");
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 async function challenge(verifier: string): Promise<string> {

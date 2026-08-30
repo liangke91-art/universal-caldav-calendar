@@ -234,7 +234,7 @@ function createCalendarServer(env: Env) {
   return server;
 }
 
-const mcpApiHandler: ExportedHandler<Env> = {
+const mcpApiHandler = {
   fetch(request, env, ctx) {
     return createMcpHandler(() => createCalendarServer(env), { route: "/mcp" })(request, env, ctx);
   },
