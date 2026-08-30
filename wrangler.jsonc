@@ -1,50 +1,25 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "universal-caldav-calendar",
   "main": "src/index.ts",
-  "compatibility_date": "2026-03-10",
-  "migrations": [
-    {
-      "new_sqlite_classes": ["MyMCP"],
-      "tag": "v1"
-    }
-  ],
-  "compatibility_flags": ["nodejs_compat"],
-  "durable_objects": {
-    "bindings": [
-      {
-        "class_name": "MyMCP",
-        "name": "MCP_OBJECT"
-      }
-    ]
-  },
+  "compatibility_date": "2026-07-28",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
       "id": "f502cef3511a46b2a90ba03fe657eb07"
+    },
+    {
+      "binding": "CALENDAR_KV",
+      "id": "c12c7d6bd0d649f3a6dcf35f81bbacf8"
     }
   ],
-  "ai": {
-    "binding": "AI"
+  "vars": {
+    "PUBLIC_BASE_URL": "https://universal-caldav-calendar.liangke91.workers.dev",
+    "DEFAULT_TIMEZONE": "Asia/Shanghai",
+    "DEFAULT_REMINDER_MINUTES": "30",
+    "ALLOWED_GITHUB_LOGINS": "liangke91-art"
   },
-  "observability": {
-    "enabled": true
-  },
-  "dev": {
-    "port": 8788
-  },
-  "secrets": {
-    "required": [
-      "ACCESS_CLIENT_ID",
-      "ACCESS_CLIENT_SECRET",
-      "ACCESS_TOKEN_URL",
-      "ACCESS_AUTHORIZATION_URL",
-      "ACCESS_JWKS_URL",
-      "COOKIE_ENCRYPTION_KEY"
-    ]
-  }
+  "workers_dev": true,
+  "preview_urls": false
 }

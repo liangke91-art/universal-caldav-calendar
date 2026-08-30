@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "universal-calendar": {
+      "type": "http",
+      "url": "https://universal-caldav-calendar.liangke91.workers.dev/mcp"
+    }
+  }
+}

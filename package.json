@@ -1,24 +1,33 @@
 {
-	"name": "universal-caldav-calendar",
-	"version": "0.0.1",
-	"private": true,
-	"scripts": {
-		"deploy": "wrangler deploy",
-		"dev": "wrangler dev",
-		"start": "wrangler dev",
-		"cf-typegen": "wrangler types",
-		"type-check": "tsc --noEmit"
-	},
-	"dependencies": {
-		"@cloudflare/workers-oauth-provider": "^0.8.1",
-		"agents": "^0.17.1",
-		"just-pick": "^4.2.0",
-		"octokit": "^5.0.5",
-		"zod": "^4.4.3"
-	},
-	"devDependencies": {
-		"@types/node": "^26.0.1",
-		"typescript": "6.0.3",
-		"wrangler": "^4.105.0"
-	}
+  "name": "universal-caldav-calendar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "npm run type-check && npm test",
+    "deploy": "npm run check && wrangler deploy",
+    "type-check": "tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.10.3",
+    "@js-temporal/polyfill": "^0.5.1",
+    "@modelcontextprotocol/server": "2.0.0",
+    "agents": "0.21.0",
+    "fast-xml-parser": "^5.3.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.11.0",
+    "@cloudflare/workers-types": "^4.20260828.0",
+    "@types/node": "^24.3.0",
+    "typescript": "6.0.3",
+    "vitest": "^4.0.18",
+    "wrangler": "^4.123.0"
+  }
 }
