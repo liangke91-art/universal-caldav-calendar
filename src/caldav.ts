@@ -175,7 +175,34 @@ export class CalDavClient {
 
     // A final raw-data fallback covers servers that support calendar-query but
     // reject the optional calendar-data/expand extension.
-    return report('<C:comp-filter name="VEVENT"/>', "");
+    const rawFallback = await report('<C:comp-filter name="VEVENT"/>', "");
+    if (rawFallback.length) return rawFallback;
+
+    // fruux and a few other servers can accept UID-filtered REPORT requests yet
+    // return an empty response for broader calendar-query filters. Enumerate the
+    // WebDAV collection and retrieve its members with calendar-multiget instead.
+    // CalendarService applies the requested time interval locally afterwards.
+    const collectionUrl = new URL(calendarUrl).toString().replace(/\/$/, "");
+    const members = (await this.propfind(calendarUrl, "1", "<D:getetag/><D:resourcetype/>"))
+      .map((item) => ({
+        href: item.href,
+        url: new URL(item.href, calendarUrl).toString(),
+        resourceType: item.properties.resourcetype,
+      }))
+      .filter((item) => {
+        if (!item.href || item.url.replace(/\/$/, "") === collectionUrl) return false;
+        return !(item.resourceType && typeof item.resourceType === "object" && "collection" in item.resourceType);
+      });
+
+    const resources: CalDavResource[] = [];
+    for (let index = 0; index < members.length; index += 40) {
+      const chunk = members.slice(index, index + 40);
+      const hrefs = chunk.map((item) => `<D:href>${xmlEscape(new URL(item.url).pathname)}</D:href>`).join("");
+      const body = `<?xml version="1.0" encoding="utf-8"?><C:calendar-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/><C:calendar-data/></D:prop>${hrefs}</C:calendar-multiget>`;
+      const response = await this.request("REPORT", calendarUrl, body, { depth: "1" });
+      resources.push(...parseResources(await response.text()));
+    }
+    return resources;
   }
 
   async findEventByUid(uid: string, calendars?: CalDavCalendar[]): Promise<{ calendar: CalDavCalendar; resource: CalDavResource }> {
