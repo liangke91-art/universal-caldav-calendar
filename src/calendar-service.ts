@@ -99,7 +99,7 @@ export class CalendarService {
     }
     const rangeStart = Temporal.Instant.from(startIso).epochMilliseconds;
     const rangeEnd = Temporal.Instant.from(endIso).epochMilliseconds;
-    return events
+    const filtered = events
       .filter((event) => {
         if (event.status.toUpperCase() === "CANCELLED") return false;
         const [eventStart, eventEnd] = this.eventInterval(event);
@@ -107,6 +107,8 @@ export class CalendarService {
       })
       .sort((left, right) => left.start.localeCompare(right.start))
       .slice(0, Math.max(1, Math.min(maxResults, 1000)));
+    console.info("calendar_list_events", { parsed: events.length, returned: filtered.length });
+    return filtered;
   }
 
   async createEvent(input: {

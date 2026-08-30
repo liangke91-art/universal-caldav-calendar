@@ -168,14 +168,17 @@ export class CalDavClient {
     const ranged = await report(
       `<C:comp-filter name="VEVENT"><C:time-range start="${xmlEscape(start)}" end="${xmlEscape(end)}"/></C:comp-filter>`,
     );
+    console.info("calendar_query_stage", { stage: "ranged", count: ranged.length });
     if (ranged.length) return ranged;
 
     const expandedFallback = await report('<C:comp-filter name="VEVENT"/>');
+    console.info("calendar_query_stage", { stage: "expanded_fallback", count: expandedFallback.length });
     if (expandedFallback.length) return expandedFallback;
 
     // A final raw-data fallback covers servers that support calendar-query but
     // reject the optional calendar-data/expand extension.
     const rawFallback = await report('<C:comp-filter name="VEVENT"/>', "");
+    console.info("calendar_query_stage", { stage: "raw_fallback", count: rawFallback.length });
     if (rawFallback.length) return rawFallback;
 
     // fruux and a few other servers can accept UID-filtered REPORT requests yet
@@ -193,6 +196,7 @@ export class CalDavClient {
         if (!item.href || item.url.replace(/\/$/, "") === collectionUrl) return false;
         return !(item.resourceType && typeof item.resourceType === "object" && "collection" in item.resourceType);
       });
+    console.info("calendar_query_stage", { stage: "collection_members", count: members.length });
 
     const resources: CalDavResource[] = [];
     for (let index = 0; index < members.length; index += 40) {
@@ -200,7 +204,9 @@ export class CalDavClient {
       const hrefs = chunk.map((item) => `<D:href>${xmlEscape(new URL(item.url).pathname)}</D:href>`).join("");
       const body = `<?xml version="1.0" encoding="utf-8"?><C:calendar-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><D:prop><D:getetag/><C:calendar-data/></D:prop>${hrefs}</C:calendar-multiget>`;
       const response = await this.request("REPORT", calendarUrl, body, { depth: "1" });
-      resources.push(...parseResources(await response.text()));
+      const parsed = parseResources(await response.text());
+      console.info("calendar_query_stage", { stage: "multiget_chunk", requested: chunk.length, count: parsed.length });
+      resources.push(...parsed);
     }
     return resources;
   }
