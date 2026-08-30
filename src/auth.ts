@@ -1,0 +1,201 @@
+import { Buffer } from "node:buffer";
+import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+import { randomToken, safeEqual } from "./crypto";
+
+export type AuthProps = {
+  userId: string;
+  login: string;
+  name: string;
+};
+
+type OAuthEnv = Env & { OAUTH_PROVIDER: OAuthHelpers };
+type UpstreamState = {
+  oauthRequest: AuthRequest;
+  verifier: string;
+};
+type GitHubTokenResponse = {
+  access_token?: string;
+  error?: string;
+};
+type GitHubUser = {
+  id?: number;
+  login?: string;
+  name?: string | null;
+};
+
+const GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize";
+const GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token";
+const GITHUB_USER_URL = "https://api.github.com/user";
+const STATE_COOKIE = "__Host-CALENDAR_STATE";
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+function cookie(request: Request, name: string): string | undefined {
+  return request.headers
+    .get("cookie")
+    ?.split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
+
+function base64Url(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString("base64url");
+}
+
+async function challenge(verifier: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+  return base64Url(new Uint8Array(digest));
+}
+
+function clearStateCookie(): string {
+  return `${STATE_COOKIE}=; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=0`;
+}
+
+function consentPage(clientName: string, state: string, csrf: string): Response {
+  const body = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>授权 Universal Calendar</title><style>body{font-family:system-ui,sans-serif;max-width:640px;margin:56px auto;padding:0 20px;color:#18212f}.card{border:1px solid #dce2ea;border-radius:16px;padding:28px;box-shadow:0 8px 30px #17304a12}button{font:inherit;border:0;border-radius:9px;padding:12px 18px;background:#1668dc;color:#fff;font-weight:700}.muted{color:#58687a;line-height:1.6}</style></head><body><div class="card"><h1>授权 Universal Calendar</h1><p><strong>${escapeHtml(clientName)}</strong> 请求访问你的日历工具。</p><p class="muted">下一步使用 GitHub 验证身份。此应用不申请仓库权限，也不会保存 GitHub access token。授权后可查询、新建、修改和删除日程；CalDAV 凭据通过独立的加密设置页录入，不进入对话。</p><form method="post" action="/authorize"><input type="hidden" name="state" value="${escapeHtml(state)}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit">使用 GitHub 登录并授权</button></form></div></body></html>`;
+  return new Response(body, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "set-cookie": `__Host-CALENDAR_CSRF=${csrf}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`,
+    },
+  });
+}
+
+function allowedGitHubLogin(env: Env, login: string): boolean {
+  const allowed = env.ALLOWED_GITHUB_LOGINS.split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return allowed.includes(login.toLowerCase());
+}
+
+async function exchangeGitHubCode(env: Env, code: string, verifier: string): Promise<string> {
+  const body = new URLSearchParams({
+    client_id: env.GITHUB_CLIENT_ID,
+    client_secret: env.GITHUB_CLIENT_SECRET,
+    code,
+    redirect_uri: `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/callback`,
+    code_verifier: verifier,
+  });
+  const response = await fetch(GITHUB_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+      "user-agent": "universal-caldav-calendar",
+    },
+    body,
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error("GitHub token exchange failed.");
+  const token = (await response.json()) as GitHubTokenResponse;
+  if (!token.access_token || token.error) throw new Error("GitHub did not return an access token.");
+  return token.access_token;
+}
+
+async function fetchGitHubIdentity(accessToken: string): Promise<Required<Pick<GitHubUser, "id" | "login">> & GitHubUser> {
+  const response = await fetch(GITHUB_USER_URL, {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${accessToken}`,
+      "user-agent": "universal-caldav-calendar",
+      "x-github-api-version": "2022-11-28",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error("GitHub identity lookup failed.");
+  const user = (await response.json()) as GitHubUser;
+  if (!Number.isSafeInteger(user.id) || !user.login) throw new Error("GitHub identity response is incomplete.");
+  return user as Required<Pick<GitHubUser, "id" | "login">> & GitHubUser;
+}
+
+export async function handleAuthRequest(request: Request, env: OAuthEnv): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method === "GET" && url.pathname === "/authorize") {
+    const oauthRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+    if (!oauthRequest.clientId) return new Response("Invalid OAuth request", { status: 400 });
+    const state = randomToken();
+    const csrf = randomToken();
+    await env.OAUTH_KV.put(`consent:${state}`, JSON.stringify(oauthRequest), { expirationTtl: 600 });
+    const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId);
+    return consentPage(client?.clientName || "ChatGPT / Codex", state, csrf);
+  }
+
+  if (request.method === "POST" && url.pathname === "/authorize") {
+    const form = await request.formData();
+    const state = String(form.get("state") ?? "");
+    const csrf = String(form.get("csrf") ?? "");
+    const cookieCsrf = cookie(request, "__Host-CALENDAR_CSRF") ?? "";
+    if (!csrf || !cookieCsrf || !safeEqual(csrf, cookieCsrf)) return new Response("Invalid CSRF token", { status: 400 });
+    const oauthRequest = await env.OAUTH_KV.get<AuthRequest>(`consent:${state}`, "json");
+    await env.OAUTH_KV.delete(`consent:${state}`);
+    if (!oauthRequest?.clientId) return new Response("Expired OAuth request", { status: 400 });
+
+    const upstreamState = randomToken();
+    const verifier = randomToken(48);
+    await env.OAUTH_KV.put(
+      `upstream:${upstreamState}`,
+      JSON.stringify({ oauthRequest, verifier } satisfies UpstreamState),
+      { expirationTtl: 600 },
+    );
+    const authorize = new URL(GITHUB_AUTHORIZE_URL);
+    authorize.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
+    authorize.searchParams.set("redirect_uri", `${env.PUBLIC_BASE_URL.replace(/\/$/, "")}/callback`);
+    authorize.searchParams.set("state", upstreamState);
+    authorize.searchParams.set("code_challenge", await challenge(verifier));
+    authorize.searchParams.set("code_challenge_method", "S256");
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: authorize.toString(),
+        "set-cookie": `${STATE_COOKIE}=${upstreamState}; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=600`,
+        "cache-control": "no-store",
+      },
+    });
+  }
+
+  if (request.method === "GET" && url.pathname === "/callback") {
+    const state = url.searchParams.get("state") ?? "";
+    const cookieState = cookie(request, STATE_COOKIE) ?? "";
+    if (!state || !cookieState || !safeEqual(state, cookieState)) {
+      return new Response("Invalid OAuth state", { status: 400, headers: { "set-cookie": clearStateCookie() } });
+    }
+    const stored = await env.OAUTH_KV.get<UpstreamState>(`upstream:${state}`, "json");
+    await env.OAUTH_KV.delete(`upstream:${state}`);
+    if (!stored) return new Response("Expired OAuth callback", { status: 400, headers: { "set-cookie": clearStateCookie() } });
+    const code = url.searchParams.get("code") ?? "";
+    if (!code || url.searchParams.has("error")) {
+      return new Response("GitHub authorization was not completed", { status: 400, headers: { "set-cookie": clearStateCookie() } });
+    }
+    try {
+      const accessToken = await exchangeGitHubCode(env, code, stored.verifier);
+      const user = await fetchGitHubIdentity(accessToken);
+      if (!allowedGitHubLogin(env, user.login)) {
+        return new Response("This GitHub account is not allowed.", { status: 403, headers: { "set-cookie": clearStateCookie() } });
+      }
+      const userId = `github:${user.id}`;
+      const name = user.name?.trim() || user.login;
+      const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
+        request: stored.oauthRequest,
+        userId,
+        scope: stored.oauthRequest.scope,
+        metadata: { label: user.login },
+        props: { userId, login: user.login, name } satisfies AuthProps,
+      });
+      return new Response(null, {
+        status: 302,
+        headers: { location: redirectTo, "set-cookie": clearStateCookie(), "cache-control": "no-store" },
+      });
+    } catch {
+      return new Response("GitHub identity verification failed", { status: 403, headers: { "set-cookie": clearStateCookie() } });
+    }
+  }
+
+  return new Response("Not Found", { status: 404 });
+}
