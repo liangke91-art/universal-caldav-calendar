@@ -1,0 +1,23 @@
+{
+  "name": "universal-caldav-calendar",
+  "version": "0.1.0",
+  "description": "An account-linked remote CalDAV calendar plugin for ChatGPT and Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "license": "MIT",
+  "keywords": ["calendar", "caldav", "fruux", "harmonyos", "remote-mcp"],
+  "interface": {
+    "displayName": "Universal Calendar",
+    "shortDescription": "Use any CalDAV calendar from ChatGPT and Codex.",
+    "longDescription": "Connect fruux or another public HTTPS CalDAV account once, then query and manage the same calendars from ChatGPT and Codex on any computer signed into your account.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "Show my calendar for tomorrow.",
+      "Find a free two-hour slot next week.",
+      "Create a weekly recurring calendar event."
+    ]
+  }
+}
