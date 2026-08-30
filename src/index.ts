@@ -251,6 +251,18 @@ async function defaultHandler(request: Request, env: Env & { OAUTH_PROVIDER: any
   return new Response("Not Found", { status: 404 });
 }
 
+// Compatibility export for the Durable Object namespace created by the
+// original Cloudflare MCP starter. It is intentionally not bound or used by
+// the calendar service, but keeping the class avoids a destructive namespace
+// deletion migration during the first deployment of this replacement Worker.
+export class MyMCP {
+  constructor(_state: DurableObjectState, _env: Env) {}
+
+  fetch(): Response {
+    return new Response("This legacy MCP Durable Object is retired.", { status: 410 });
+  }
+}
+
 export default new OAuthProvider<Env>({
   apiRoute: "/mcp",
   apiHandler: mcpApiHandler,
