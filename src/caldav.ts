@@ -186,7 +186,7 @@ export class CalDavClient {
     // WebDAV collection and retrieve its members with calendar-multiget instead.
     // CalendarService applies the requested time interval locally afterwards.
     const collectionUrl = new URL(calendarUrl).toString().replace(/\/$/, "");
-    const members = (await this.propfind(calendarUrl, "1", "<D:getetag/><D:resourcetype/>"))
+    let members = (await this.propfind(calendarUrl, "1", "<D:getetag/><D:resourcetype/>"))
       .map((item) => ({
         href: item.href,
         url: new URL(item.href, calendarUrl).toString(),
@@ -196,6 +196,27 @@ export class CalDavClient {
         if (!item.href || item.url.replace(/\/$/, "") === collectionUrl) return false;
         return !(item.resourceType && typeof item.resourceType === "object" && "collection" in item.resourceType);
       });
+    if (!members.length) {
+      try {
+        const syncBody = `<?xml version="1.0" encoding="utf-8"?><D:sync-collection xmlns:D="DAV:"><D:sync-token/><D:sync-level>1</D:sync-level><D:prop><D:getetag/><D:resourcetype/></D:prop></D:sync-collection>`;
+        const syncResponse = await this.request("REPORT", calendarUrl, syncBody, { depth: "1" });
+        members = parseMultiStatus(await syncResponse.text())
+          .map((item) => ({
+            href: item.href,
+            url: new URL(item.href, calendarUrl).toString(),
+            resourceType: item.properties.resourcetype,
+          }))
+          .filter((item) => {
+            if (!item.href || item.url.replace(/\/$/, "") === collectionUrl) return false;
+            return !(item.resourceType && typeof item.resourceType === "object" && "collection" in item.resourceType);
+          });
+      } catch (error) {
+        console.info("calendar_query_stage", {
+          stage: "sync_collection_unavailable",
+          error: error instanceof Error ? error.message : "unknown",
+        });
+      }
+    }
     console.info("calendar_query_stage", { stage: "collection_members", count: members.length });
 
     const resources: CalDavResource[] = [];
