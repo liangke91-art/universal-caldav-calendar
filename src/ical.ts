@@ -55,7 +55,14 @@ export function unfoldIcs(ics: string): string[] {
   const physical = ics.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const logical: string[] = [];
   for (const line of physical) {
-    if ((line.startsWith(" ") || line.startsWith("\t")) && logical.length) {
+    const trimmed = line.trimStart();
+    const serverIndentedProperty =
+      (line.startsWith(" ") || line.startsWith("\t")) && /^[A-Z0-9-]+(?:;[^:]*)?:/i.test(trimmed);
+    if (serverIndentedProperty) {
+      // Some CalDAV XML serializers indent every line inside calendar-data.
+      // Those are complete iCalendar properties, not RFC 5545 folded lines.
+      logical.push(trimmed);
+    } else if ((line.startsWith(" ") || line.startsWith("\t")) && logical.length) {
       logical[logical.length - 1] += line.slice(1);
     } else if (line.length) {
       logical.push(line);
