@@ -180,17 +180,6 @@ function parseAlarmMinutes(block: string[]): number[] {
 export function parseIcsEvents(ics: string, defaultTimezone: string): CalendarEvent[] {
   const unfolded = unfoldIcs(ics);
   const blocks = eventBlocks(unfolded);
-  const markerIndex = ics.indexOf("BEGIN:VEVENT");
-  console.info("ical_parse_structure", {
-    length: ics.length,
-    physicalLines: ics.split(/\r\n|\r|\n/).length,
-    logicalLines: unfolded.length,
-    blocks: blocks.length,
-    exactBeginLine: unfolded.includes("BEGIN:VEVENT"),
-    markerPrefixCodes: markerIndex < 0
-      ? []
-      : Array.from(ics.slice(Math.max(0, markerIndex - 8), markerIndex)).map((character) => character.charCodeAt(0)),
-  });
   return blocks.map((block) => {
     const props = topLevelProperties(block);
     const first = (name: string) => props.get(name)?.[0];
