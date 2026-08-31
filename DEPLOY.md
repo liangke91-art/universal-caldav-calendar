@@ -2,6 +2,8 @@
 
 下面的 GitHub Client Secret、CalDAV 用户名和密码都不要发到聊天里，也不要写进仓库。项目中的示例文件只有空占位符。
 
+> 当前实例已经部署完成并通过生产验收。第 1–7 节用于重建、迁移或排障；日常使用无需在其他电脑重复部署。华为手机的最后接入步骤见 [HARMONYOS.md](./HARMONYOS.md)。
+
 ## 1. 账号与费用
 
 需要三个已注册账号：
@@ -58,7 +60,7 @@ DEFAULT_REMINDER_MINUTES=30
 
 ## 4. 上传与部署
 
-将项目文件上传或推送到私有仓库 `liangke91-art/universal-caldav-calendar`。仓库连接到 Worker 后，推送到 `main` 会触发 Cloudflare 构建。
+将项目文件上传或推送到仓库 `liangke91-art/universal-caldav-calendar`。仓库连接到 Worker 后，推送到 `main` 会触发 Cloudflare 构建。
 
 如果在本机部署，安装 Node.js 24+ 后在项目目录运行：
 
@@ -90,7 +92,7 @@ npx @modelcontextprotocol/inspector@latest
 https://universal-caldav-calendar.liangke91.workers.dev/mcp
 ```
 
-浏览器会先显示 Universal Calendar 授权页，再进入 GitHub。GitHub 授权页不应出现仓库权限。登录后至少测试：
+浏览器会先显示 Universal Calendar 授权页，再进入 GitHub。GitHub 授权页不应出现仓库权限。首次登录后至少测试：
 
 1. `calendar_account_status` 返回尚未连接；
 2. `calendar_create_setup_link` 返回 10 分钟有效的一次性 URL；
@@ -117,7 +119,7 @@ Timezone: Asia/Shanghai
 按 OpenAI 当前官方流程：
 
 1. 在 ChatGPT 打开 `设置 → Security and login → Developer mode`；
-2. 打开 Plugins 页面并添加 MCP connection；
+2. 打开 Plugins 页面并添加 MCP connection，名称使用 `Universal CalDAV Calendar`；
 3. URL 填 `https://universal-caldav-calendar.liangke91.workers.dev/mcp`；
 4. 完成 GitHub OAuth，检查发现的工具、schema 和写操作注解；
 5. 复制 connection technical ID（通常以 `plugin_asdk_app...` 开头）。
@@ -128,17 +130,11 @@ Timezone: Asia/Shanghai
 .\scripts\finalize-plugin.ps1 -AppId "plugin_asdk_app_你的ID"
 ```
 
-脚本生成的 `.app.json` 已被 `.gitignore` 排除。开发者模式连接或已安装的账号级插件在不同电脑上的可用性由同一 ChatGPT/Codex 账号与工作区政策决定；远程 Worker 不需要在其他电脑重复安装服务。
+脚本生成的 `.app.json` 已被 `.gitignore` 排除。当前账号已经创建并授权 `Universal CalDAV Calendar`。在其他电脑上登录同一 ChatGPT/Codex 账号即可使用；若未立即显示，打开插件管理页重新启用或刷新连接。远程 Worker 不需要在其他电脑重复安装服务。
 
 ## 8. 接入 HarmonyOS
 
-HarmonyOS 6.0/6.1 常见路径：
-
-```text
-日历 → 左上角三横 → 添加 → 导入日程 → 添加 CalDAV 日历
-```
-
-填写 fruux 的 HTTPS 地址和为手机生成的设备专用用户名、密码。若当前机型或系统没有该入口，先升级系统与华为日历；仍无入口时，需要使用系统可用的 CalDAV 同步客户端。
+手机必须使用与远程 MCP 不同的设备专用用户名和密码。当前 fruux 账号中已经创建 `Huawei HarmonyOS` 设备，不要删除 `Universal Calendar MCP` 设备，也不要把两组密码混用。完整步骤见 [HARMONYOS.md](./HARMONYOS.md)。
 
 ## 9. 验收清单
 
@@ -149,3 +145,5 @@ HarmonyOS 6.0/6.1 常见路径：
 - Codex 新建、修改、删除的测试日程能在 fruux 与 HarmonyOS 出现；
 - 手机新建的测试日程能被 `calendar_get_events` 查询到；
 - 完成后删除测试日程。
+
+本次生产实例已经完成除“手机端实际录入并双向观察”之外的全部验收。云端验证结果记录在 [STATUS.md](./STATUS.md)。

@@ -56,17 +56,20 @@ HarmonyOS 原生日历
 
 默认时区为 `Asia/Shanghai`，默认提前提醒为 30 分钟，两者都可在安全设置页修改。重复规则支持按日、周、月、年，以及间隔、次数、截止日期和星期选择。
 
-## 已准备的云资源
+## 当前部署状态
 
 - Worker：`https://universal-caldav-calendar.liangke91.workers.dev`
 - MCP：`https://universal-caldav-calendar.liangke91.workers.dev/mcp`
-- GitHub 私有仓库：`https://github.com/liangke91-art/universal-caldav-calendar`
-- 两个 KV namespace 已写入 `wrangler.jsonc`
-- GitHub 登录白名单已设为 `liangke91-art`
+- 健康检查：`https://universal-caldav-calendar.liangke91.workers.dev/healthz`
+- GitHub 仓库：`https://github.com/liangke91-art/universal-caldav-calendar`
+- ChatGPT App：`Universal CalDAV Calendar`，已完成 GitHub OAuth 与 CalDAV 连接
+- GitHub 登录白名单：`liangke91-art`
+- fruux：远程 MCP 设备配置已加密保存；HarmonyOS 已单独预建设备
+- 生产验收：普通 CRUD、搜索、提醒、冲突、空闲时间、重复日程展开与整系列删除均通过
 
-尚需完成：创建 GitHub OAuth App、保存两个 OAuth 值和一个随机加密主密钥、把本项目推送到私有仓库并部署、连接 fruux 与 Codex。所有涉及真实密钥和 CalDAV 密码的步骤均由账号主人在对应安全界面完成。
+当前不需要再部署本机服务。其他电脑登录同一 ChatGPT/Codex 账号后使用同一个 App；如果 App 未自动出现，在插件管理页重新启用即可。剩余用户操作只有在华为手机里录入已经创建的 HarmonyOS 设备凭据，见 [HARMONYOS.md](./HARMONYOS.md)。
 
-完整步骤见 [DEPLOY.md](./DEPLOY.md)。Windows 也可在密钥配置完成后双击 `deploy.cmd` 执行检查和发布。
+完整的从零部署、恢复和维护步骤见 [DEPLOY.md](./DEPLOY.md)，本次生产验收记录见 [STATUS.md](./STATUS.md)。Windows 也可在密钥配置完成后双击 `deploy.cmd` 执行检查和发布。
 
 ## 当前限制
 
