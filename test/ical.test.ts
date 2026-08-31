@@ -56,4 +56,22 @@ describe("iCalendar helpers", () => {
     expect(event.uid).toBe("indented@example");
     expect(event.title).toBe("Indented response");
   });
+
+  it("parses CalDAV XML text that preserves CR as numeric entities", () => {
+    const encodedCarriageReturns = [
+      "BEGIN:VCALENDAR&#13;",
+      "VERSION:2.0&#13;",
+      "BEGIN:VEVENT&#13;",
+      "UID:xml-cr@example&#13;",
+      "DTSTART:20260902T020000Z&#13;",
+      "DTEND:20260902T021500Z&#13;",
+      "SUMMARY:XML carriage return response&#13;",
+      "END:VEVENT&#13;",
+      "END:VCALENDAR&#13;",
+    ].join("\n");
+    const event = parseIcsEvents(encodedCarriageReturns, "Asia/Shanghai")[0];
+    expect(event.uid).toBe("xml-cr@example");
+    expect(event.title).toBe("XML carriage return response");
+    expect(event.start).toBe("2026-09-02T02:00:00Z");
+  });
 });
