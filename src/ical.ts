@@ -52,7 +52,12 @@ export type UpdateEventInput = {
 };
 
 export function unfoldIcs(ics: string): string[] {
-  const physical = ics.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  // Some CalDAV XML responses preserve CR in CRLF as a numeric XML entity,
+  // yielding literal `&#13;\n` (or `&#xD;\n`) after XML parsing. Restore the
+  // transport line ending before applying RFC 5545 line unfolding.
+  const transportNormalized = ics
+    .replace(/&#(?:13|x0*d);(?=\r?\n|$)/gi, "\r");
+  const physical = transportNormalized.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const logical: string[] = [];
   for (const line of physical) {
     const trimmed = line.trimStart();
